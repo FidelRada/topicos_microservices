@@ -1,0 +1,114 @@
+# render.yaml
+# Define la versión del blueprint de Render
+services:
+  # ====================================================================
+  # 1. Base de Datos Gestionada (Reemplaza al servicio 'db' en el compose)
+  # ====================================================================
+  - type: pserv
+    name: topicos-db
+    plan: standard # Puedes cambiar a 'starter' para el plan gratuito
+    databaseName: topicos_db
+    # Opcional: Especifica la versión de PostgreSQL si es necesario
+    # serviceDetails:
+    #   database:
+    #     version: "15"
+
+  # ====================================================================
+  # 2. Caché Redis Gestionado (Reemplaza al servicio 'redis' en el compose)
+  # ====================================================================
+  - type: redis
+    name: topicos-redis
+    plan: starter # Plan gratuito/básico
+
+  # ====================================================================
+  # 3. Microservicio de Inscripciones ('app' en el compose)
+  # ====================================================================
+  - type: pserv
+    name: inscripciones
+    # Indicamos a Render que construya la imagen desde el Dockerfile en /inscripciones
+    dockerContext: ./inscripciones
+    # Comando para iniciar la aplicación (similar a 'command' del compose)
+    startCommand: npm run dev:reset
+    env: node
+    # Exponemos el puerto interno del contenedor
+    port: 3001
+    # Variables de Entorno
+    envVars:
+      # Apunta a los servicios gestionados usando la sintaxis de Render Blueprint
+      - key: DB_HOST
+        value: ${topicos-db.host}
+      - key: DB_USER
+        value: ${topicos-db.user}
+      - key: DB_PASSWORD
+        value: ${topicos-db.password}
+      - key: DB_NAME
+        value: topicos_db
+      - key: DB_PORT
+        value: 5432
+      - key: REDIS_HOST
+        value: ${topicos-redis.host}
+      - key: REDIS_PORT
+        value: ${topicos-redis.port}
+      - key: PORT
+        value: 3001
+      # IMPORTANTE: Eliminamos el 'volumes' ya que el código se copia en el build.
+
+  # ====================================================================
+  # 4. Microservicio de Login ('login' en el compose)
+  # ====================================================================
+  - type: pserv # Usamos 'pserv' (Private Service) ya que sólo el gateway debe acceder
+    name: login-service
+    dockerContext: ./login
+    startCommand: npm run dev
+    env: node
+    port: 3002
+    envVars:
+      - key: JWT_SECRET
+        value: clave_super_secreta
+      # Variables de DB para el login
+      - key: DB_HOST
+        value: ${topicos-db.host}
+      - key: DB_USER
+        value: ${topicos-db.user}
+      - key: DB_PASSWORD
+        value: ${topicos-db.password}
+      - key: PORT
+        value: 3002
+
+  # ====================================================================
+  # 5. API Gateway ('gateway' en el compose)
+  # ====================================================================
+  - type: web # Usamos 'web' para que sea accesible desde internet (público)
+    name: api-gateway
+    dockerContext: ./gateway
+    startCommand: npm run dev
+    env: node
+    port: 3000
+    # Regla de pull request: crea un entorno de vista previa (preview environment) por cada PR
+    pullRequest:
+      autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 3000
+      # ** CRUCIAL **: Configura las URL internas de los microservicios
+      # En Render, la URL interna es el nombre del servicio + el puerto interno
+      - key: INSCRIPCIONES_URL
+        value: http://inscripciones:3001
+      - key: LOGIN_URL
+        value: http://login-service:3002
+      - key: JWT_SECRET # Debe coincidir
+        value: clave_super_secreta
+
+  # ====================================================================
+  # 6. Frontend ('mi_frontend' en el compose)
+  # ====================================================================
+  - type: web # Usamos 'web' porque el Dockerfile usa Nginx
+    name: mi-frontend
+    dockerContext: ./mi_frontend/
+    port: 80 # El puerto que expone Nginx en el Dockerfile
+    # Depende del gateway para obtener datos
+    dependsOn:
+      - api-gateway
+    envVars:
+      - key: VITE_API_BASE_URL # Variable de entorno para tu frontend (ajustar en código si es necesario)
+        value: ${api-gateway.url}
