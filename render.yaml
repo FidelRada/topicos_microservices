@@ -1,10 +1,10 @@
 # render.yaml
 # Define la versión del blueprint de Render
 services:
-  # ====================================================================
-  # 1. Base de Datos Gestionada (Reemplaza al servicio 'db' en el compose)
-  # ====================================================================
-  - type: pserv
+# ====================================================================
+# 1. Base de Datos Gestionada (CORREGIDO: type: database)
+# ====================================================================
+  - type: database 
     name: topicos-db
     plan: standard # Puedes cambiar a 'starter' para el plan gratuito
     databaseName: topicos_db
@@ -13,20 +13,22 @@ services:
     #   database:
     #     version: "15"
 
-  # ====================================================================
-  # 2. Caché Redis Gestionado (Reemplaza al servicio 'redis' en el compose)
-  # ====================================================================
+# ====================================================================
+# 2. Caché Redis Gestionado (CORREGIDO: type: redis)
+# ====================================================================
   - type: redis
     name: topicos-redis
     plan: starter # Plan gratuito/básico
+    # Los campos 'port' y 'env' no son necesarios para los servicios gestionados (database/redis)
 
-  # ====================================================================
-  # 3. Microservicio de Inscripciones ('app' en el compose)
-  # ====================================================================
+# ====================================================================
+# 3. Microservicio de Inscripciones ('app' en el compose)
+# (CORREGIDO: 'port' y 'envVars' son campos válidos para type: pserv)
+# ====================================================================
   - type: pserv
     name: inscripciones
     # Indicamos a Render que construya la imagen desde el Dockerfile en /inscripciones
-    dockerContext: ./inscripciones
+    dockerContext: ./inscripciones 
     # Comando para iniciar la aplicación (similar a 'command' del compose)
     startCommand: npm run dev:reset
     env: node
@@ -51,12 +53,12 @@ services:
         value: ${topicos-redis.port}
       - key: PORT
         value: 3001
-      # IMPORTANTE: Eliminamos el 'volumes' ya que el código se copia en el build.
 
-  # ====================================================================
-  # 4. Microservicio de Login ('login' en el compose)
-  # ====================================================================
-  - type: pserv # Usamos 'pserv' (Private Service) ya que sólo el gateway debe acceder
+# ====================================================================
+# 4. Microservicio de Login ('login' en el compose)
+# (CORREGIDO: 'port' y 'envVars' son campos válidos para type: pserv)
+# ====================================================================
+  - type: pserv
     name: login-service
     dockerContext: ./login
     startCommand: npm run dev
@@ -64,8 +66,7 @@ services:
     port: 3002
     envVars:
       - key: JWT_SECRET
-        value: clave_super_secreta
-      # Variables de DB para el login
+        value: clave_super_secreta 
       - key: DB_HOST
         value: ${topicos-db.host}
       - key: DB_USER
@@ -75,40 +76,39 @@ services:
       - key: PORT
         value: 3002
 
-  # ====================================================================
-  # 5. API Gateway ('gateway' en el compose)
-  # ====================================================================
-  - type: web # Usamos 'web' para que sea accesible desde internet (público)
+# ====================================================================
+# 5. API Gateway ('gateway' en el compose)
+# (type: web para acceso público)
+# ====================================================================
+  - type: web 
     name: api-gateway
     dockerContext: ./gateway
     startCommand: npm run dev
     env: node
     port: 3000
-    # Regla de pull request: crea un entorno de vista previa (preview environment) por cada PR
     pullRequest:
       autoDeploy: true
     envVars:
       - key: PORT
         value: 3000
-      # ** CRUCIAL **: Configura las URL internas de los microservicios
-      # En Render, la URL interna es el nombre del servicio + el puerto interno
+      # URLs internas usan el nombre del servicio de Render
       - key: INSCRIPCIONES_URL
         value: http://inscripciones:3001
       - key: LOGIN_URL
         value: http://login-service:3002
-      - key: JWT_SECRET # Debe coincidir
+      - key: JWT_SECRET
         value: clave_super_secreta
 
-  # ====================================================================
-  # 6. Frontend ('mi_frontend' en el compose)
-  # ====================================================================
-  - type: web # Usamos 'web' porque el Dockerfile usa Nginx
+# ====================================================================
+# 6. Frontend ('mi_frontend' en el compose)
+# (type: web porque usa un Dockerfile con Nginx)
+# ====================================================================
+  - type: web
     name: mi-frontend
     dockerContext: ./mi_frontend/
-    port: 80 # El puerto que expone Nginx en el Dockerfile
-    # Depende del gateway para obtener datos
+    port: 80 
     dependsOn:
       - api-gateway
     envVars:
-      - key: VITE_API_BASE_URL # Variable de entorno para tu frontend (ajustar en código si es necesario)
+      - key: VITE_API_BASE_URL
         value: ${api-gateway.url}
